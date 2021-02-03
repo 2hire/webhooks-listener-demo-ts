@@ -1,0 +1,12 @@
+# Editor
+.vscode/
+
+# Dependency directory
+node_modules
+
+# Exclude tsc generated files
+types/
+index.js
+
+# Ignore yarn.lock
+yarn.lock
