@@ -1,5 +1,7 @@
 import fastify, { FastifyInstance } from 'fastify'
 import fastifyRawBody from 'fastify-raw-body'
+import * as dotenv from 'dotenv'
+import * as crypto from "crypto";
 
 // import json schemas as normal
 import QuerystringSchema from './schemas/querystring.json'
@@ -11,17 +13,23 @@ import { QuerystringSchema as QuerystringSchemaInterface } from './types/queryst
 import { HeadersSchema as HeadersSchemaInterface } from './types/headers'
 import { BodySchema as BodySchemaInterface } from './types/body'
 
-import * as crypto from "crypto";
 
-enum Algorithm {
-    sha256 = "sha256"
-}
+const server = fastify()
+
+dotenv.config()
+
+export const SECRET = process.env.SECRET as string
+
 type Signal = "online" | "position" | "distance_covered" | "autonomy_percentage" | "autonomy_meters" | "*"
+
 const signal_name = new Set<Signal>(["online", "position", "distance_covered", "autonomy_percentage", "autonomy_meters", "*"]);
-let secret = "A secret of your choice"
 
 function isSignal(signal: string): signal is Signal {
     return (signal_name.has(signal as Signal))
+}
+
+enum Algorithm {
+    sha256 = "sha256"
 }
 
 const generateSignature = (message: string, secret: string, algorithm: string): string => {
@@ -32,9 +40,6 @@ const generateSignature = (message: string, secret: string, algorithm: string): 
     hmac.update(message, "utf8");
     return `${algorithm}=${hmac.digest("hex")}`;
 }
-
-const server = fastify()
-
 
 server.listen(8080, (err, address) => {
     if (err) {
@@ -90,7 +95,7 @@ server.post<{
     preValidation: async (request, reply, done) => { 
         const x_hub_signature = request.headers["x-hub-signature"]
         console.log(" ")
-        const signature = generateSignature(request.rawBody as string, secret, Algorithm.sha256);
+        const signature = generateSignature(request.rawBody as string, SECRET, Algorithm.sha256);
         //console.log("the real signature is      " + signature)
         //console.log("the header signature is    " + x_hub_signature)
         console.log("REQUEST.RAW:", request.rawBody as string)
