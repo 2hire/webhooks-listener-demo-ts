@@ -13,7 +13,6 @@ import { QuerystringSchema as QuerystringSchemaInterface } from './types/queryst
 import { HeadersSchema as HeadersSchemaInterface } from './types/headers'
 import { BodySchema as BodySchemaInterface } from './types/body'
 
-
 const server = fastify()
 
 dotenv.config()
@@ -21,9 +20,7 @@ dotenv.config()
 export const SECRET = process.env.SECRET as string
 
 type Signal = "online" | "position" | "distance_covered" | "autonomy_percentage" | "autonomy_meters" | "*"
-
 const signal_name = new Set<Signal>(["online", "position", "distance_covered", "autonomy_percentage", "autonomy_meters", "*"]);
-
 function isSignal(signal: string): signal is Signal {
     return (signal_name.has(signal as Signal))
 }
@@ -31,7 +28,6 @@ function isSignal(signal: string): signal is Signal {
 enum Algorithm {
     sha256 = "sha256"
 }
-
 const generateSignature = (message: string, secret: string, algorithm: string): string => {
     if (!secret) {
         return "";
@@ -39,6 +35,12 @@ const generateSignature = (message: string, secret: string, algorithm: string): 
     const hmac = crypto.createHmac(algorithm, secret);
     hmac.update(message, "utf8");
     return `${algorithm}=${hmac.digest("hex")}`;
+}
+
+let splitted: string []
+function validateTopic (topic: string): boolean {
+    splitted = topic.split(":");
+    return splitted.length !== 4 || splitted[0] !== "vehicle" || splitted[2] !== "generic" || !isSignal(splitted[3]) || !signal_name.has(splitted[3] as Signal)
 }
 
 server.listen(8080, (err, address) => {
@@ -64,16 +66,7 @@ server.get<{
     },
     preValidation: (request, reply, done) => {
         const { 'hub.mode': mode, 'hub.topic': topic, 'hub.challenge': challenge } = request.query
-        let splitted = topic.split(":");
-        done((  
-            // to be transformed in a function
-            splitted.length !== 4 ||
-            splitted[0] !== "vehicle" ||
-            splitted[2] !== "generic" ||
-            !isSignal(splitted[3]) ||
-            !signal_name.has(splitted[3] as Signal ||
-            mode !== 'subscribe')
-        ) ? new Error('hub.mode or hub.topic validation error') : undefined)
+        done((validateTopic(topic) || mode !== 'subscribe') ? new Error('hub.mode or hub.topic validation error') : undefined)
     }
 }, async (request, reply) => {
     console.log(" ")
@@ -94,48 +87,31 @@ server.post<{
     },
     preValidation: async (request, reply, done) => { 
         const x_hub_signature = request.headers["x-hub-signature"]
-        console.log(" ")
         const signature = generateSignature(request.rawBody as string, SECRET, Algorithm.sha256);
-        //console.log("the real signature is      " + signature)
-        //console.log("the header signature is    " + x_hub_signature)
-        console.log("REQUEST.RAW:", request.rawBody as string)
-        let splitted = request.body.topic.split(":");
-        done((  
-            // to be transformed in a function
-            splitted.length !== 4 ||
-            splitted[0] !== "vehicle" ||
-            splitted[2] !== "generic" ||
-            !isSignal(splitted[3]) ||
-            !signal_name.has(splitted[3] as Signal ||
-            `${Algorithm.sha256}=${x_hub_signature}` !== signature)
-        ) ? new Error('Topic ' + request.body.topic + ' or signature ' + x_hub_signature + ' validation error') : undefined)
+        done((validateTopic(request.body.topic) || x_hub_signature !== signature) ? new Error('Topic ' + request.body.topic + ' or signature ' + x_hub_signature + ' validation error') : undefined)
     }
 }, async (request, reply) => {
-    let splitted = request.body.topic.split(":");
-    const name = splitted[3]
-    let data = request.body.payload.data
-
     console.log(" ")
     console.log("SIGNATURE:         ", request.headers["x-hub-signature"])
     console.log("VEHICLE:           ", splitted[1])
     console.log("SIGNAL TYPE:       ", splitted[2])
-    console.log("SIGNAL NAME:       ", name)
-    if (name === "position") {
+    console.log("SIGNAL NAME:       ", splitted[3])
+    if (splitted[3] === "position") {
         console.log("VALUE:             ")
-        console.log("   Latitude:       ", data.latitude)
-        console.log("   Longitude:      ", data.longitude)
+        console.log("   Latitude:       ", request.body.payload.data.latitude)
+        console.log("   Longitude:      ", request.body.payload.data.longitude)
     }
-    if (name === "autonomy_percentage") {
-        console.log("VALUE:             ", data.percentage)
+    if (splitted[3] === "autonomy_percentage") {
+        console.log("VALUE:             ", request.body.payload.data.percentage)
     }
-    if (name === "autonomy_meters") {
-        console.log("VALUE:             ", data.meters)
+    if (splitted[3] === "autonomy_meters") {
+        console.log("VALUE:             ", request.body.payload.data.meters)
     }
-    if (name === "distance_covered") {
-        console.log("VALUE:             ", data.meters)
+    if (splitted[3] === "distance_covered") {
+        console.log("VALUE:             ", request.body.payload.data.meters)
     }
-    if (name === "online") {
-        console.log("VALUE:             ", data.online)
+    if (splitted[3] === "online") {
+        console.log("VALUE:             ", request.body.payload.data.online)
     }
     return {}
 })
