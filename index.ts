@@ -1,19 +1,12 @@
-import fastify, { FastifyInstance } from 'fastify'
-import fastifyRawBody from 'fastify-raw-body'
-import * as dotenv from 'dotenv'
+import express = require("express");
+// import body parser
+import * as bodyParser from 'body-parser';
 import * as crypto from "crypto";
+import * as dotenv from 'dotenv';
+import { BodySchema as BodySchemaInterface } from './types/body';
+import { HeadersSchema as HeadersSchemaInterface } from './types/headers';
 
-// import json schemas as normal
-import QuerystringSchema from './schemas/querystring.json'
-import HeadersSchema from './schemas/headers.json'
-import BodySchema from './schemas/body.json'
-
-// import the generated interfaces
-import { QuerystringSchema as QuerystringSchemaInterface } from './types/querystring'
-import { HeadersSchema as HeadersSchemaInterface } from './types/headers'
-import { BodySchema as BodySchemaInterface } from './types/body'
-
-const server = fastify()
+const server = express()
 
 dotenv.config()
 
@@ -43,54 +36,39 @@ function validateTopic (topic: string): boolean {
     return splitted.length !== 4 || splitted[0] !== "vehicle" || splitted[2] !== "generic" || !isSignal(splitted[3]) || !signal_name.has(splitted[3] as Signal)
 }
 
-server.listen(8080, (err, address) => {
-    if (err) {
-        console.error(err)
-        process.exit(1)
-    }
-    console.log(`Server listening at ${address}`)
+server.listen(8080, () => {
+    console.log(`Server listening at port 8080`)
 })
 
-server.register(require('fastify-raw-body'), {
-    field: 'rawBody',
-    global: false,
-    encoding: 'utf-8',
-    runFirst: true
-})
-
-server.get<{
-    Querystring: QuerystringSchemaInterface
-}>('/listener', {
-    schema: {
-        querystring: QuerystringSchema
-    },
-    preValidation: (request, reply, done) => {
-        const { 'hub.mode': mode, 'hub.topic': topic, 'hub.challenge': challenge } = request.query
-        done((validateTopic(topic) || mode !== 'subscribe') ? new Error('hub.mode or hub.topic validation error') : undefined)
-    }
-}, async (request, reply) => {
+server.get('/listener', async (req, res) => {
     console.log(" ")
-    console.log("Hello, you have subscribed to get information about the topic: "+request.query["hub.topic"])
-    console.log("The challenge string is: "+request.query["hub.challenge"])
-    return request.query["hub.challenge"]
+    console.log("Hello, you have subscribed to get information about the topic: "+req.query["hub.topic"])
+    console.log("The challenge string is: "+req.query["hub.challenge"])
+    res.set('Content-Type', 'text/plain').send(req.query["hub.challenge"])
 })
+
+
+server.use(bodyParser.json({
+    verify: (req, res, buf ) => {
+        // check for the signature
+        const signature = req.headers["x-hub-signature"] as string | null;
+        if (!signature) {
+            throw new Error("No signature found");
+        }
+        // get signature algorithm
+        let calculatedSignature = generateSignature(buf.toString("utf-8"), SECRET, Algorithm.sha256);
+        // compare signatures safely with crypto
+        if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(calculatedSignature))) {
+            throw new Error("Invalid signature");
+        }
+    }
+}))
 
 server.post<{
     Headers: HeadersSchemaInterface
     Body: BodySchemaInterface 
-}>('/listener', {
-    schema: {
-        headers: HeadersSchema,
-        body: BodySchema 
-    }, config: {
-        rawBody: true
-    },
-    preValidation: async (request, reply, done) => { 
-        const x_hub_signature = request.headers["x-hub-signature"]
-        const signature = generateSignature(request.rawBody as string, SECRET, Algorithm.sha256);
-        done((validateTopic(request.body.topic) || x_hub_signature !== signature) ? new Error('Topic ' + request.body.topic + ' or signature ' + x_hub_signature + ' validation error') : undefined)
-    }
-}, async (request, reply) => {
+}>('/listener',async (request, reply) => {
+    validateTopic(request.body.topic)
     console.log(" ")
     console.log("SIGNATURE:         ", request.headers["x-hub-signature"])
     console.log("VEHICLE:           ", splitted[1])
@@ -113,5 +91,5 @@ server.post<{
     if (splitted[3] === "online") {
         console.log("VALUE:             ", request.body.payload.data.online)
     }
-    return {}
+    reply.json({})
 })
